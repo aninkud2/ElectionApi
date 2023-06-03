@@ -1,154 +1,275 @@
-const express =require("express")
-const mongoose = require("mongoose")
-const port=3434
- 
-const app=express()
-app.use(express.json())
+const express = require("express");
+const mongoose = require("mongoose");
+PORT = 3456;
 
+const app = express();
+app.use(express.json());
 
-const electionSchema =new mongoose.Schema({
-state:{
-    type:String,
-    required:[true,"State is required"]},
+mongoose
+.connect(
+"mongodb+srv://ajoluwatimilehin:ATloqRN8RpY6Z0Zi@cluster0.kdxpgkz.mongodb.net/"
 
-parties:{
-    type:Array,
-    required:[true,"parties is required"]
-},
+)
 
-result:{
-    type:Object,
-    required:[true,"result is required"]
+  .then(() => {
+    console.log("connected to database");
+  })
+  .catch((e) => {
+    console.log(e.message);
+  });
+
+const electionSchema = mongoose.Schema({
+  state: { type: String, required: [true, "state required"], unique: [true,"you cant create a data twice"] },
+  parties: { type: Array,required:[true,"the parties are meant to be complete"] },
+  result: Object,
+
+  totalLG: Number,
+  totalRegisteredVoters: {
+    type: Number,
+    required: [
+      true,
+      "Enter the total number of registerd voters in this state",
+    ],
+  },
+  isRigged: {
+    type: Boolean,
+    default: function () {
+      let totalVoters = 0;
+      for (const [key, value] of Object.entries(this.result)) {
+        totalVoters += value;
+      }
+      if (totalVoters > this.totalRegisteredVoters) {
+        return true;
+      } else {
+        return false;
+      }
     },
-collationOfficer:{
-    type:String,
-    required:[true,"C.O is required"]}
-    ,
+  },
+  totalVoters: {
+    type: Number,
+    default: function () {
+      let totalVoters = 0;
+      for (const [key, value] of Object.entries(this.result)) {
+        totalVoters += value;
+      }
+      return totalVoters;
+    },
+  },
+  winner: {
+    type: String,
+    default: function () {
+      let maxKey = null;
+      let maxValue = -Infinity;
+      for (const [key, value] of Object.entries(this.result)) {
+        if (value > maxValue) {
+          maxValue = value;
+          maxKey = key;
+        }
+      }
+      if (this.isRigged == false) {
+        return `${maxKey} with ${maxValue} votes`;
+      } else {
+        return "no party because the election was rigged";
+      }
+    },
+    required: false,
+  },
+});
 
-isRigged:{
-    type:Boolean,
-    required:[true,"isRigged is required"]},
-totalLg:{
-    type:Number,
+const electionModel = mongoose.model("Elections", electionSchema);
 
-      required:[true,"Total lg is required"]},
-  winner:String,
-},
+//create new entry
+app.post("/create", async (req, res) => {
+  try {
+    const newEntry = await electionModel.create(req.body);
+    res.status(200).json({
+      message: "new entry successfullly added",
+      data: newEntry,
+    });
+  } catch (e) {
+    res.status(500).json({
+      message: e.message,
+    });
+  }
+});
 
-
-{
-    timestamps: true
-}
-)
-
-
-const electionmodel=mongoose.model("Presidential Election",electionSchema)
-
-
-app.get("/",(req,res)=>{
-
-    res.send("WELCOME TO OUR ELECTION API HOMEPAGE")
-} )
-
-
-app.post("/create",async(req,res)=>{
-try {
-    // if(typeof req.body.state !== "string"){
-    //     res.send("Please send ur state as a string data")
-    //     // console.log(typeof req.body.state)
-    // }else{
-    const newEntry = await  electionmodel.create(req.body)
-    res.status(200).json({message:`${electionmodel.length} user has been created`, data:newEntry})
-    console.log(JSON.stringify(newEntry.result.pdp))
-} catch (error) {
-    res.status(400).json(error.message)
- 
-}
-
-})
-
-app.get("/getall",async(req,res)=>{
-try {
-     const allResult= await electionmodel.find()
-     if(!allResult){res.send("No results available yet")}
-     else{res.status(200).json({Message:"Find available results below",data:allResult})}
-    
-} catch (error) {
-    res.status(400).json(error.message)   
-}
-
-
-
-})
-
-
-// to find all rigged election
-
-
-app.get("/riggedelection",async(req,res)=>{
-
-try {
-   const rigged= await electionmodel.find({isRigged:true})
-   res.status(200).json({Message:"The states elections were rigged",data:rigged})
-    
-} catch (error) {
-    res.status(404).json(error.message)    
-}
-
-})
- 
-//Double collation Officer
-
-
-app.get("/double",async(req,res)=>{
-
-    try {
-       const rigged= await electionmodel.find({collationOfficer:req.body.collationOfficer})
-       res.status(200).json({Message:`${req.body.collationOfficer} conducted this  elections`,data:rigged})
-        
-    } catch (error) {
-        res.status(404).json(error.message)    
+//get all results
+app.get("/result", async (req, res) => {
+  try {
+    const results = await electionModel.find();
+    if (!results) {
+      res.status(404).json({
+        message: "results not found",
+      });
+    } else if (results.length == 0) {
+      res.status(200).json({
+        message: "no result in the database",
+      });
+    } else {
+      res.status(200).json({
+        message: "successful",
+        data: results,
+      });
     }
-    
-}
-)
-//OR
-app.get("/double/:co",async(req,res)=>{
+  } catch (e) {
+    res.status(500).json({
+      message: e.message,
+    });
+  }
+});
 
-    try {
-       const rigged= await electionmodel.find({collationOfficer:req.params.co})
-       res.status(200).json({Message:`${req.params.co} conducted this  elections`,data:rigged})
-        
-    } catch (error) {
-        res.status(404).json(error.message)    
+//getting 1 result with id
+app.get("/result/:id", async (req, res) => {
+  try {
+    const resultId = req.params.id;
+    const result = await electionModel.findById(resultId);
+    if (!result) {
+      res.status(404).json({
+        message: "result not found",
+      });
+    } else {
+      res.status(200).json({
+        message: "successful",
+        data: result,
+      });
     }
-    
-}
-)
-
-//delete rigged
-
-app.delete("/deleteriggedelection",async(req,res)=>{
-
-    try {
-       const drigged= await electionmodel.find({isRigged:false})
-       const rigged= await electionmodel.deleteMany({isRigged:false})
-
-       res.status(200).json({Message:"The following states elections were annulled and canceled ",data:[drigged,rigged]})
-        
-    } catch (error) {
-        res.status(404).json(error.message)    
+  } catch (e) {
+    res.status(500).json({
+      message: e.message,
+    });
+  }
+});
+// updating result
+app.put("/result/:id", async (req, res) => {
+  try {
+    const resultId = req.params.id;
+    const updatedResult = await electionModel.findByIdAndUpdate(
+      resultId,
+      req.body,
+      {
+        new: true,
+        runValidators: true,
+      }
+    );
+    if (!updatedResult) {
+      res.status(404).json({
+        message: "no updated result",
+      });
+    } else {
+      res.status(200).json({
+        message: "successful",
+        data: updatedResult,
+      });
     }
+  } catch (e) {
+    res.status(500).json({
+      message: e.message,
+    });
+  }
+});
+
+// gettin when election is rigged
+
+app.get("/rigged", async (req, res) => {
+  try {
+    const rigged = await electionModel.find({ isRigged: true });
+    res.status(200).json({
+      message: "the followng elections where rigged",
+      data: rigged,
+    });
+  } catch (e) {
+    res.status(500).json({
+      message: e.message,
+    });
+  }
+});
+
+// to check for winner
+app.get("/winner/:state", async (req, res) => {
+  try {
+    const state = await electionModel.find({ state: req.params.state });
+    const Winner = state[0].winner;
     
-    })
 
+    res.status(200).json({
+      message: `the winner of ${req.params.state} state election is ${Winner}`,
+      statue: `Rigged: ${state[0].isRigged}` 
+      
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: error.message,
+    });
+  }
+});
 
+//to check for double collation officer
+app.get("/collation/:collattion", async (req, res) => {
+  try {
+    const officerResults = await electionModel.find({
+      collationOfficer: req.params.collattion,
+    });
+    if (officerResults.length < 1) {
+      res.status(200).json({
+        message: "this is not a registered collation officer",
+      });
+    } else if (officerResults.length > 1) {
+      res.status(200).json({
+        message: "this officer handled multiple election results",
+        data: officerResults,
+      });
+    } else {
+      res.status(200).json({
+        message: "this officer handled only 1 result",
+        data: officerResults,
+      });
+    }
+  } catch (e) {
+    res.status(500).json({
+      message: e.message,
+    });
+  }
+});
 
+// to delete rigged election
+app.delete("/rigged", async (req, res) => {
+  try {
+    const rigged = await electionModel.find({ isRigged: true });
+    const deleteRigged = await electionModel.deleteMany({ isRigged: true });
+    res.status(200).json({
+      message: "the following elections are inconclusive",
+      data: rigged,
+      deleteMessage: deleteRigged,
+    });
+  } catch (e) {
+    res.status(500).json({
+      message: e.message,
+    });
+  }
+});
 
+// deleting result
+app.delete("/result/:id", async (req, res) => {
+  try {
+    const resultId = req.params.id;
+    const deletedResult = electionModel.findByIdAndDelete(resultId);
+    if (!deletedResult) {
+      res.status(404).json({
+        message: "no result found",
+      });
+    } else {
+      res.status(200).json({
+        message: "successfully deleted",
+        data: deletedResult,
+      });
+    }
+  } catch (e) {
+    res.status(500).json({
+      message: e.message,
+    });
+  }
+});
 
-mongoose.connect("mongodb+srv://ajoluwatimilehin:ATloqRN8RpY6Z0Zi@cluster0.kdxpgkz.mongodb.net/").then(
-()=>{console.log("Connection to the database is successful")}
-).catch(
-  (error)=>{console.log(error.message)}  
-)
-app.listen(port,()=>{console.log("working on port "+port)})
+app.listen(PORT, () => {
+  console.log("server is on ", PORT);
+});
